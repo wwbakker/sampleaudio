@@ -8,23 +8,57 @@ object WaveFile {
   private val FORMAT_TAG = Array[Byte](0x66, 0x6D, 0x74, 0x20)
   private val AUDIO_FORMAT = Array[Byte](0x1, 0x0)
   private val SUBCHUNK_ID = Array[Byte](0x64, 0x61, 0x74, 0x61)
-  private val BYTES_PER_SAMPLE : Short = 1
+  private val HEADER_SIZE_BYTES = 40
   private val sampleRate = 48000
   private val channelCount : Short = 1
-  private val stretch = 20
-  private val byteRate: Int = sampleRate * channelCount * BYTES_PER_SAMPLE
-  private val blockAlign: Short = (channelCount * BYTES_PER_SAMPLE).toShort
 
 
-  def write(values: Seq[Int]): Unit = {
-    val datalength: Int = values.length * stretch * BYTES_PER_SAMPLE
-    val bb = ByteBuffer.allocate(datalength + 40)
+  def write(originalSamples: Seq[Int], durationInMs : Int, bytesPerSample: Int = 1): Unit = {
+    val numberOfSamplesRequired = durationInMs * (sampleRate / 1000)
+    val stretch = numberOfSamplesRequired / originalSamples.length
+    val byteBuffer = writeWaveHeader(numberOfSamplesRequired, bytesPerSample)
+    writeWaveBody(byteBuffer, originalSamples, bytesPerSample, stretch)
+
+
+    val wf = file"output.wav"
+    if (wf.exists) {
+      wf.delete()
+    }
+    wf.createFile()
+      .appendByteArray(byteBuffer.array())
+  }
+  private def writeWaveBody(byteBuffer: ByteBuffer,
+                            originalSamples: Seq[Int],
+                            bytesPerSample: Int,
+                            stretchFactor: Int): Unit = {
+    val vMin = originalSamples.min.toDouble
+    val vMax = originalSamples.max.toDouble
+    val originalSampleResolution = vMax - vMin
+    val newSampleResolution = Math.pow(255, bytesPerSample)
+    val scale = newSampleResolution / originalSampleResolution
+    val normalizedValues = originalSamples.map(vOriginal => (vOriginal - vMin) * scale).map(_.toInt)
+    val stretched = interpolate(normalizedValues, stretchFactor).toSeq
+
+    // Data
+    byteBuffer.order(ByteOrder.LITTLE_ENDIAN)
+    bytesPerSample match {
+      case 1 => stretched.foreach(sample => byteBuffer.put(sample.toByte))
+      case 2 => stretched.foreach(sample => byteBuffer.putShort(sample.toShort))
+    }
+  }
+
+  private def writeWaveHeader(numberOfSamples: Int, bytesPerSample : Int): ByteBuffer = {
+    val dataLength: Int = numberOfSamples * bytesPerSample
+    val bb = ByteBuffer.allocate(dataLength + HEADER_SIZE_BYTES)
+    val byteRate: Int = sampleRate * channelCount * bytesPerSample
+    val blockAlign: Short = (channelCount * bytesPerSample).toShort
+
     // ChunkID (4BE)
     bb.order(ByteOrder.BIG_ENDIAN)
     bb.put(RIFF_HEADER)
     // ChunkSize (4LE)
     bb.order(ByteOrder.LITTLE_ENDIAN)
-    bb.putInt(datalength + 40)
+    bb.putInt(dataLength + HEADER_SIZE_BYTES)
     // Format (4BE)
     bb.order(ByteOrder.BIG_ENDIAN)
     bb.put(FORMAT_WAVE)
@@ -52,7 +86,7 @@ object WaveFile {
     bb.putShort(blockAlign)
     // BitsPerSample (2LE)
     bb.order(ByteOrder.LITTLE_ENDIAN)
-    bb.putShort((BYTES_PER_SAMPLE * 8).toShort)
+    bb.putShort((bytesPerSample * 8).toShort)
     // /ExtraParamSize (2) PCM doesn't exist
     // /ExtraParams (?)
     // -- data subchunk
@@ -61,28 +95,10 @@ object WaveFile {
     bb.put(SUBCHUNK_ID)
     // Subchunk2Size (4LE)
     bb.order(ByteOrder.LITTLE_ENDIAN)
-    bb.putInt(datalength)
-    // Data
-    bb.order(ByteOrder.BIG_ENDIAN)
-    val vMin = values.min.toDouble
-    val vMax = values.max.toDouble
-    val scale = vMax - vMin
-    val normalizedValues = values.map( vOriginal => (vOriginal - vMin) / scale * 255).map(_.toInt)
-    val stretched =
-      interpolate(normalizedValues, stretch)
-      .map(_.toByte).toArray
-
-    bb.put(stretched)
-
-    val wf = file"output.wav"
-    if (wf.exists) {
-      wf.delete()
-    }
-    wf.createFile()
-      .appendByteArray(bb.array())
+    bb.putInt(dataLength)
   }
 
-  def interpolate(values : Seq[Int], times : Int) : Iterator[Double] =
+  private def interpolate(values : Seq[Int], times : Int) : Iterator[Double] =
     values
       .sliding(2)
       .map(_.toList)

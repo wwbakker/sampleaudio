@@ -39,7 +39,6 @@ object Program extends App {
 
   val samples = averageOut(values(img))
 
-//  samples.foreach(println)
-  WaveFile.write(samples)
+  WaveFile.write(samples, 1000, 2)
   // https://www.youtube.com/watch?v=VQOdmckqNro
 }
