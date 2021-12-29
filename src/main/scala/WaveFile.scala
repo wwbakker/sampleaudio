@@ -8,7 +8,7 @@ object WaveFile {
   private val FORMAT_TAG = Array[Byte](0x66, 0x6D, 0x74, 0x20)
   private val AUDIO_FORMAT = Array[Byte](0x1, 0x0)
   private val SUBCHUNK_ID = Array[Byte](0x64, 0x61, 0x74, 0x61)
-  private val HEADER_SIZE_BYTES = 40
+  private val HEADER_SIZE_BYTES = 44
   private val sampleRate = 48000
   private val channelCount : Short = 1
 
@@ -16,7 +16,7 @@ object WaveFile {
   def write(originalSamples: Seq[Int], durationInMs : Int, bytesPerSample: Int = 1): Unit = {
     val numberOfSamplesRequired = durationInMs * (sampleRate / 1000)
     val stretch = numberOfSamplesRequired / originalSamples.length
-    val byteBuffer = writeWaveHeader(numberOfSamplesRequired, bytesPerSample)
+    val byteBuffer = writeWaveHeader(originalSamples.length * stretch, bytesPerSample)
     writeWaveBody(byteBuffer, originalSamples, bytesPerSample, stretch)
 
 
@@ -99,12 +99,12 @@ object WaveFile {
   }
 
   private def interpolate(values : Seq[Int], times : Int) : Iterator[Double] =
-    values
+    (values :+ values.last)
       .sliding(2)
       .map(_.toList)
       .flatMap{
         case begin :: end :: Nil =>
           val step = (end - begin) / times.toDouble
           Range(0, times).map(_ * step + begin)
-      } ++ Iterator(values.last.toDouble)
+      }
 }
